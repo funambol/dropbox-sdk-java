@@ -14,7 +14,6 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 
-import java.math.BigDecimal;
 import java.util.HashMap;
 
 /*>>> import checkers.nullness.quals.Nullable; */
@@ -193,13 +192,13 @@ public abstract class JsonReader<T>
         }
     }
 
-    public static BigDecimal readBigDecimal(JsonParser parser)
+    public static double readDouble(JsonParser parser)
         throws  IOException, JsonReadException
     {
         try {
-            BigDecimal bd = parser.getDecimalValue();
+            double v = parser.getDoubleValue();
             parser.nextToken();
-            return bd;
+            return v;
         } catch (JsonParseException ex) {
             throw JsonReadException.fromJackson(ex);
         }

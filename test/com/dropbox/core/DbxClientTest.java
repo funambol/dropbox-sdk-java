@@ -1,6 +1,7 @@
 package com.dropbox.core;
 
 import com.dropbox.core.json.JsonReader;
+import com.dropbox.core.util.Dumpable;
 import com.dropbox.core.util.IOUtil;
 import static com.dropbox.core.util.StringUtil.jq;
 
@@ -52,7 +53,7 @@ public class DbxClientTest
         DbxRequestConfig requestConfig = new DbxRequestConfig("sdk-test", null);
         DbxClient client = new DbxClient(requestConfig, authInfo.accessToken, authInfo.host);
 
-        String timestamp = new SimpleDateFormat("yyyy-mm-dd HH.mm.ss").format(new Date());
+        String timestamp = new SimpleDateFormat("yyyy-MM-dd HH.mm.ss").format(new Date());
         String basePath = "/Java SDK Tests/" + timestamp;
 
         DbxEntry entry = client.createFolder(basePath);
@@ -190,6 +191,17 @@ public class DbxClientTest
     {
         init();
 
+        // NOTE: In these tests, we never actually perform a non-path-prefix /delta call.  This is so that
+        // you can run these tests against a Dropbox account that is having modifications performed on it
+        // by other clients.  This is unfortunate, so maybe we should switch to requiring that the test
+        // be run on an account that has nothing else going on?
+
+        // Get latest cursors before modifying dropbox folders
+        String latestCursor = client.getDeltaLatestCursorWithPathPrefix(p());
+        String latestCursorWithPath = client.getDeltaLatestCursorWithPathPrefix(p("b"));
+        assertNotNull(latestCursor);
+        assertNotNull(latestCursorWithPath);
+
         DbxEntry.Folder top = (DbxEntry.Folder) client.getMetadata(p());
         DbxEntry.File a = addFile(p("a.txt"), 10);
         DbxEntry.Folder b = client.createFolder(p("b"));
@@ -241,6 +253,55 @@ public class DbxClientTest
             }
 
             assertEquals(expected.size(), 0);
+        }
+
+        // Test latest cursor responses
+        {
+            HashSet<DbxEntry> expected = new HashSet<DbxEntry>(Arrays.asList(a, b, b_1, b_2, c, c_1, c_2));
+            String lcPrefix = p().toLowerCase();
+            String cursor = latestCursor;
+            while (true) {
+                DbxDelta<DbxEntry> d = client.getDelta(cursor);
+                for (DbxDelta.Entry<DbxEntry> e : d.entries) {
+                    System.out.print(e.toStringMultiline());
+                    assertTrue(e.lcPath.startsWith(lcPrefix+"/") || e.lcPath.equals(lcPrefix));
+                    assertNotNull(e.metadata);  // We shouldn't see deletes in our test folder.
+                    boolean removed = expected.remove(e.metadata);
+                    assertTrue(removed);
+                }
+                cursor = d.cursor;
+                if (!d.hasMore) break;
+            }
+
+            assertEquals(expected.size(), 0);
+        }
+
+        // Test latest cursor with path prefix
+        {
+            HashSet<DbxEntry> expected = new HashSet<DbxEntry>(Arrays.asList(b, b_1, b_2, c, c_1, c_2));
+
+            String prefix = b.path;
+            String lcPrefix = prefix.toLowerCase();
+            String cursor = latestCursorWithPath;
+            while (true) {
+                DbxDelta<DbxEntry> d = client.getDeltaWithPathPrefix(cursor, prefix);
+                for (DbxDelta.Entry<DbxEntry> e : d.entries) {
+                    assertTrue(e.lcPath.startsWith(lcPrefix+"/") || e.lcPath.equals(lcPrefix));
+                    assertNotNull(e.metadata);  // We should never see deletes.
+                    boolean removed = expected.remove(e.metadata);
+                    assertTrue(removed);
+                }
+                cursor = d.cursor;
+                if (!d.hasMore) break;
+            }
+
+            assertEquals(expected.size(), 0);
+        }
+
+        // Test longpoll_delta
+        {
+            DbxLongpollDeltaResult longpollDelta = client.getLongpollDelta(latestCursor, 30);
+            assertTrue(longpollDelta.mightHaveChanges);
         }
     }
 
@@ -411,6 +472,51 @@ public class DbxClientTest
     }
 
     @Test
+    public void testPhotoInfo()
+        throws DbxException, IOException, InterruptedException
+    {
+        init();
+
+        final String folder = p("photo-info-folder");
+        final String orig = folder + "/test-imag"+E_ACCENT+".jpeg";
+
+        // Upload an image.
+        InputStream in = this.getClass().getResourceAsStream("test-image.jpeg");
+        if (in == null) {
+            throw new AssertionError("couldn't load test image \"test-image.jpeg\"");
+        }
+        DbxEntry.File uploadEntry;
+        try {
+            uploadEntry = client.uploadFile(orig, DbxWriteMode.add(), -1, in).asFile();
+        }
+        finally {
+            IOUtil.closeInput(in);
+        }
+        assertEquals(uploadEntry.path.toLowerCase(), orig.toLowerCase());
+
+        // Get metadata with photo info (keep trying until photo info is available)
+        int maxTries = 20;
+        int delaySeconds = 2;
+        DbxEntry.File origEntry;
+        for (int tries = 0; ; tries++) {
+            if (tries == maxTries) {
+                int waited = delaySeconds * tries;
+                throw new AssertionError("Photo info was pending after " + waited + " seconds.  Server slowness?");
+            }
+            Thread.sleep(delaySeconds * 1000);
+            origEntry = client.getMetadata(orig, true).asFile();
+            if (origEntry.photoInfo == DbxEntry.File.PhotoInfo.PENDING) break;
+        }
+
+        assertEquals(origEntry.path.toLowerCase(), orig.toLowerCase());
+        assertNotNull(origEntry.photoInfo);
+
+        // List folder with photo info.
+        DbxEntry.File childEntry = client.getMetadataWithChildren(folder, true).children.get(0).asFile();
+        assertEquals(childEntry, origEntry);
+    }
+
+    @Test
     public void testThumbnail()
         throws DbxException, IOException
     {
@@ -563,7 +669,6 @@ public class DbxClientTest
         DbxEntry.WithChildren mwc = client.getMetadataWithChildren(p());
         assertEquals(mwc.children.size(), 2);
     }
-
 
     @Test
     public void testCopyFolder()
