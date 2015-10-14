@@ -9,7 +9,7 @@
 
     <groupId>com.dropbox.core</groupId>
     <artifactId>dropbox-core-sdk</artifactId>
-    <version>1.7.8fun</version>
+    <version>1.7.9fun-SNAPSHOT</version>
 
     <packaging>jar</packaging>
 

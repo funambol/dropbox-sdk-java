@@ -84,4 +84,16 @@ public class DbxEntryTest
         assertTrue(f.videoInfo == DbxEntry.File.VideoInfo.PENDING);
         assertTrue(f.photoInfo == DbxEntry.File.PhotoInfo.PENDING);
     }
+
+    @Test
+    public void parserSkipsUnknownFieldsInPhotoInfo() throws Exception {
+        DbxEntry.File f = loadJsonResource(DbxEntry.Reader, "file-with-photo-info-and-unknown-field.json").asFile();
+        assertNotNull(f.photoInfo, "Expected entry to have a photo info");
+    }
+
+    @Test
+    public void parserSkipsUnknownFieldsInVideoInfo() throws Exception {
+        DbxEntry.File f = loadJsonResource(DbxEntry.Reader, "file-with-video-info-and-unknown-field.json").asFile();
+        assertNotNull(f.videoInfo, "Expected entry to have a video info");
+    }
 }
